@@ -1,0 +1,60 @@
+Server code
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+
+// Define the service and characteristic UUIDs
+#define SERVICE_UUID "12345678-1234-5678-1234-56789abcdef0"
+#define CHARACTERISTIC_UUID "abcdefab-cdef-1234-5678-abcdefabcdef"
+
+// Define the analog pins for the FSR sensors
+const int fsrPins[8] = {34, 35, 32, 33, 25, 26, 27, 14};  // ESP32 ADC1 pins
+
+BLEServer *pServer = NULL;
+BLECharacteristic *pCharacteristic;
+bool deviceConnected = false;
+
+class MyServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+    }
+};
+
+void setup() {
+    Serial.begin(115200);
+    BLEDevice::init("ESP32_FSR_Server");
+
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+    pCharacteristic = pService->createCharacteristic(
+                        CHARACTERISTIC_UUID,
+                        BLECharacteristic::PROPERTY_READ |
+                        BLECharacteristic::PROPERTY_NOTIFY);
+
+    pService->start();
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pServer->getAdvertising()->start();
+
+    Serial.println("BLE Server Started");
+}
+
+void loop() {
+    if (deviceConnected) {
+        String fsrValues = "";
+        for (int i = 0; i < 8; i++) {
+            int fsrValue = analogRead(fsrPins[i]);  // Read from 8 FSR sensors
+            fsrValues += String(fsrValue) + ",";
+        }
+        Serial.println("Sending: " + fsrValues);
+        pCharacteristic->setValue(fsrValues.c_str());
+        pCharacteristic->notify();
+        delay(100);
+    }
+}
