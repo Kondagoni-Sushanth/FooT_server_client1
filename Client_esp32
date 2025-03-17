@@ -1,0 +1,86 @@
+Client code and mobile code 
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEClient.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
+#include "BluetoothSerial.h" // Include Bluetooth Serial for Mobile Communication
+
+#define SERVICE_UUID "12345678-1234-5678-1234-56789abcdef0"
+#define CHARACTERISTIC_UUID "abcdefab-cdef-1234-5678-abcdefabcdef"
+
+// Define FSR sensor pins for the Client ESP32
+const int fsrPins[8] = {34, 35, 32, 33, 25, 26, 27, 14};  
+
+BLEClient* pClient;
+BLEAdvertisedDevice* myDevice;
+BLEScan* pBLEScan;
+bool doConnect = false;
+bool connected = false;
+bool doScan = true;
+BLEUUID serviceUUID(SERVICE_UUID);
+BLEUUID charUUID(CHARACTERISTIC_UUID);
+BLERemoteCharacteristic* pRemoteCharacteristic;
+
+BluetoothSerial SerialBT;  // Create Bluetooth Serial instance
+
+class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
+    void onResult(BLEAdvertisedDevice advertisedDevice) {
+        if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID)) {
+            Serial.println("Found BLE Server!");
+            BLEDevice::getScan()->stop();
+            myDevice = new BLEAdvertisedDevice(advertisedDevice);
+            doConnect = true;
+            doScan = false;
+        }
+    }
+};
+
+void setup() {
+    Serial.begin(115200);
+    SerialBT.begin("ESP32_Client");  // Start Bluetooth Serial for Mobile App
+
+    BLEDevice::init("ESP32_FSR_Client");
+    pBLEScan = BLEDevice::getScan();
+    pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+    pBLEScan->setActiveScan(true);
+    pBLEScan->start(5, false);
+}
+
+void loop() {
+    if (doConnect) {
+        pClient = BLEDevice::createClient();
+        if (pClient->connect(myDevice)) {
+            Serial.println("Connected to BLE Server");
+            BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
+            if (pRemoteService) {
+                pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
+                if (pRemoteCharacteristic) {
+                    connected = true;
+                }
+            }
+        }
+        doConnect = false;
+    }
+
+    // Read the Client's own FSR sensor values
+    String clientFSRValues = "";
+    for (int i = 0; i < 8; i++) {
+        int fsrValue = analogRead(fsrPins[i]);  
+        clientFSRValues += String(fsrValue) + ",";
+    }
+    Serial.println("Client FSR Values: " + clientFSRValues);
+
+    // Receive FSR values from the Server
+    String serverFSRValues = "";
+    if (connected) {
+        serverFSRValues = pRemoteCharacteristic->readValue();
+        Serial.println("Received Server FSR Values: " + String(serverFSRValues.c_str()));
+    }
+
+    // Combine both values (Client + Server) and send to Mobile App
+    String combinedData = "Client: " + clientFSRValues + " Server: " + serverFSRValues;
+    SerialBT.println(combinedData);  // Send to Mobile App via Bluetooth Serial
+
+    delay(1000);
+}
